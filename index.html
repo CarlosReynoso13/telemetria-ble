@@ -1,11 +1,12 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
-    <meta name='viewport' content='width=device-width,initial-scale=1.0'>
+    <meta charset="UTF-8">
+    <meta name='viewport' content='width=device-width,initial-scale=1.0,user-scalable=no'>
     <title>Auto Tracker Pro BLE</title>
     <style>
         body { background: #0a0a0a; color: #fff; font-family: sans-serif; text-align: center; margin: 0; padding: 15px; }
-        h2 { color: #00b3ff; margin: 5px 0 15px; letter-spacing: 2px; font-size: 1.5em; }
+        h2 { color: #00ff88; margin: 5px 0 15px; letter-spacing: 2px; font-size: 1.5em; }
         #btn-connect { background: #00b3ff; color: #000; border: none; padding: 12px 24px; border-radius: 8px; font-size: 1.1em; font-weight: bold; cursor: pointer; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0, 179, 255, 0.4); transition: 0.3s; }
         #btn-connect:active { transform: scale(0.95); }
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -21,12 +22,23 @@
         .val { font-size: 1.8em; font-weight: bold; margin-top: -20px; }
         .unit { font-size: 0.4em; color: #888; margin-left: 3px; }
         .lbl { color: #aaa; font-size: 0.75em; text-transform: uppercase; letter-spacing: 1px; }
+        .gps-data { font-size: 1.3em; font-family: monospace; color: #00ff88; margin-top: 10px; line-height: 1.5; }
     </style>
 </head>
 <body>
     <h2>TELEMETRIA BLE</h2>
     <button id="btn-connect">VINCULAR AUTO</button>
+    
     <div class='grid' id='dash'></div>
+
+    <!-- Panel inferior para Datos GPS -->
+    <div class='card' style='margin-top: 15px; padding: 15px;'>
+        <div class='lbl'>SEÑAL GNSS (<span id="v-sats">0</span> SATS)</div>
+        <div class="gps-data">
+            LAT: <span id="v-lat">0.000000</span><br>
+            LON: <span id="v-lon">0.000000</span>
+        </div>
+    </div>
 
     <script>
         const cfg = [
@@ -54,6 +66,7 @@
             let c = cfg.find(x => x.id === id);
             let pct = (val - c.m0) / (c.m1 - c.m0);
             if (pct < 0) pct = 0; if (pct > 1) pct = 1;
+            
             document.getElementById('p-' + id).style.strokeDashoffset = 125.6 * (1 - pct);
             document.getElementById('v-' + id).innerHTML = val + `<span class='unit'>${c.u}</span>`;
             
@@ -67,24 +80,27 @@
             document.getElementById('c-' + id).className = alm ? 'card alarm' : 'card';
         }
 
-        // MOTOR WEB BLUETOOTH API CON PARSEO BINARIO (10 BYTES)
+        // Conexión Web Bluetooth
         document.getElementById('btn-connect').addEventListener('click', async () => {
             try {
                 const device = await navigator.bluetooth.requestDevice({
                     filters: [{ name: 'Auto_Tracker_BLE' }],
                     optionalServices: ['000000ff-0000-1000-8000-00805f9b34fb']
                 });
+                
                 const server = await device.gatt.connect();
                 const service = await server.getPrimaryService('000000ff-0000-1000-8000-00805f9b34fb');
                 const characteristic = await service.getCharacteristic('0000ff01-0000-1000-8000-00805f9b34fb');
                 
                 await characteristic.startNotifications();
+                
                 document.getElementById('btn-connect').style.background = '#00ff88';
                 document.getElementById('btn-connect').innerText = 'CONECTADO';
 
                 characteristic.addEventListener('characteristicvaluechanged', (e) => {
                     let v = new DataView(e.target.value.buffer);
-                    // Desempaquetado de la estructura C en JavaScript
+                    
+                    // Decodificación estructurada de 19 bytes
                     upd('rpm', v.getUint16(0, true)); // Little Endian
                     upd('spd', v.getUint8(2));
                     upd('tmp', v.getInt8(3));
@@ -94,10 +110,21 @@
                     upd('maf', v.getUint8(7));
                     upd('throt', v.getUint8(8));
                     upd('adv', v.getInt8(9));
+
+                    // Parámetros GPS (Little Endian por defecto en ESP32 floats)
+                    document.getElementById('v-lat').innerText = v.getFloat32(10, true).toFixed(6);
+                    document.getElementById('v-lon').innerText = v.getFloat32(14, true).toFixed(6);
+                    document.getElementById('v-sats').innerText = v.getUint8(18);
                 });
+                
+                device.addEventListener('gattserverdisconnected', () => {
+                    document.getElementById('btn-connect').style.background = '#ff003c';
+                    document.getElementById('btn-connect').innerText = 'RECONECTAR';
+                });
+
             } catch (error) {
                 console.log(error);
-                alert("Error de conexión: " + error);
+                alert("Error: " + error);
             }
         });
     </script>
