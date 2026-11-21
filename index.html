@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name='viewport' content='width=device-width,initial-scale=1.0'>
+    <title>Auto Tracker Pro BLE</title>
+    <style>
+        body { background: #0a0a0a; color: #fff; font-family: sans-serif; text-align: center; margin: 0; padding: 15px; }
+        h2 { color: #00b3ff; margin: 5px 0 15px; letter-spacing: 2px; font-size: 1.5em; }
+        #btn-connect { background: #00b3ff; color: #000; border: none; padding: 12px 24px; border-radius: 8px; font-size: 1.1em; font-weight: bold; cursor: pointer; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0, 179, 255, 0.4); transition: 0.3s; }
+        #btn-connect:active { transform: scale(0.95); }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .card { background: #161616; border-radius: 12px; padding: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); border: 2px solid #222; transition: 0.3s; }
+        #c-rpm { grid-column: span 2; padding: 20px; }
+        #c-rpm .val { font-size: 3.5em; margin-top: -40px; }
+        #c-rpm svg { max-height: 140px; }
+        .alarm { animation: pulse 0.5s infinite alternate; border-color: #ff003c; }
+        @keyframes pulse { from { box-shadow: 0 0 10px #300; } to { box-shadow: 0 0 25px #ff003c; transform: scale(1.02); } }
+        svg { width: 100%; max-height: 75px; overflow: visible; margin: 10px 0; }
+        .bg { fill: none; stroke: #333; stroke-width: 10; stroke-linecap: round; }
+        .fg { fill: none; stroke: #00b3ff; stroke-width: 10; stroke-linecap: round; transition: stroke-dashoffset 0.2s ease-out, stroke 0.4s; stroke-dasharray: 125.6; stroke-dashoffset: 125.6; }
+        .val { font-size: 1.8em; font-weight: bold; margin-top: -20px; }
+        .unit { font-size: 0.4em; color: #888; margin-left: 3px; }
+        .lbl { color: #aaa; font-size: 0.75em; text-transform: uppercase; letter-spacing: 1px; }
+    </style>
+</head>
+<body>
+    <h2>TELEMETRIA BLE</h2>
+    <button id="btn-connect">VINCULAR AUTO</button>
+    <div class='grid' id='dash'></div>
+
+    <script>
+        const cfg = [
+            { id: 'rpm', lbl: 'Motor', u: 'RPM', m0: 0, m1: 7000, w1: 4500, d1: 5500 },
+            { id: 'spd', lbl: 'Velocidad', u: 'km/h', m0: 0, m1: 200, w1: 120, d1: 160 },
+            { id: 'tmp', lbl: 'Refrigerante', u: '&deg;C', m0: 40, m1: 120, w1: 100, d1: 110 },
+            { id: 'load', lbl: 'Carga', u: '%', m0: 0, m1: 100, w1: 85, d1: 95 },
+            { id: 'throt', lbl: 'Acelerador', u: '%', m0: 0, m1: 100, w1: 80 },
+            { id: 'bat', lbl: 'Bateria', u: 'V', m0: 9, m1: 16, w1: 14.8, d1: 15.2, w2: 11.8, d2: 11.2 },
+            { id: 'iat', lbl: 'Temp Aire', u: '&deg;C', m0: 10, m1: 80, w1: 65, d1: 75 },
+            { id: 'maf', lbl: 'Flujo MAF', u: 'g/s', m0: 0, m1: 150 },
+            { id: 'adv', lbl: 'Avance', u: '&deg;', m0: -20, m1: 60 }
+        ];
+
+        let html = '';
+        cfg.forEach(c => {
+            html += `<div class='card' id='c-${c.id}'><div class='lbl'>${c.lbl}</div>
+            <svg viewBox='0 0 100 55'><path class='bg' d='M 10 50 A 40 40 0 0 1 90 50'/>
+            <path class='fg' id='p-${c.id}' d='M 10 50 A 40 40 0 0 1 90 50'/></svg>
+            <div class='val' id='v-${c.id}'>0<span class='unit'>${c.u}</span></div></div>`;
+        });
+        document.getElementById('dash').innerHTML = html;
+
+        function upd(id, val) {
+            let c = cfg.find(x => x.id === id);
+            let pct = (val - c.m0) / (c.m1 - c.m0);
+            if (pct < 0) pct = 0; if (pct > 1) pct = 1;
+            document.getElementById('p-' + id).style.strokeDashoffset = 125.6 * (1 - pct);
+            document.getElementById('v-' + id).innerHTML = val + `<span class='unit'>${c.u}</span>`;
+            
+            let col = '#00b3ff'; let alm = false;
+            if (c.d1 && val >= c.d1) { col = '#ff003c'; alm = true; }
+            else if (c.w1 && val >= c.w1) { col = '#ffaa00'; }
+            if (c.d2 && val <= c.d2) { col = '#ff003c'; alm = true; }
+            else if (c.w2 && val <= c.w2) { col = '#ffaa00'; }
+            
+            document.getElementById('p-' + id).style.stroke = col;
+            document.getElementById('c-' + id).className = alm ? 'card alarm' : 'card';
+        }
+
+        // MOTOR WEB BLUETOOTH API CON PARSEO BINARIO (10 BYTES)
+        document.getElementById('btn-connect').addEventListener('click', async () => {
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'Auto_Tracker_BLE' }],
+                    optionalServices: ['000000ff-0000-1000-8000-00805f9b34fb']
+                });
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService('000000ff-0000-1000-8000-00805f9b34fb');
+                const characteristic = await service.getCharacteristic('0000ff01-0000-1000-8000-00805f9b34fb');
+                
+                await characteristic.startNotifications();
+                document.getElementById('btn-connect').style.background = '#00ff88';
+                document.getElementById('btn-connect').innerText = 'CONECTADO';
+
+                characteristic.addEventListener('characteristicvaluechanged', (e) => {
+                    let v = new DataView(e.target.value.buffer);
+                    // Desempaquetado de la estructura C en JavaScript
+                    upd('rpm', v.getUint16(0, true)); // Little Endian
+                    upd('spd', v.getUint8(2));
+                    upd('tmp', v.getInt8(3));
+                    upd('bat', (v.getUint8(4) / 10.0).toFixed(1)); 
+                    upd('load', v.getUint8(5));
+                    upd('iat', v.getInt8(6));
+                    upd('maf', v.getUint8(7));
+                    upd('throt', v.getUint8(8));
+                    upd('adv', v.getInt8(9));
+                });
+            } catch (error) {
+                console.log(error);
+                alert("Error de conexión: " + error);
+            }
+        });
+    </script>
+</body>
+</html>
