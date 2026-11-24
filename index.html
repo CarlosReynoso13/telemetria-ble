@@ -4,16 +4,35 @@
     <meta charset="UTF-8">
     <meta name='viewport' content='width=device-width,initial-scale=1.0,user-scalable=no'>
     <title>Auto Tracker Pro BLE</title>
+    
+    <!-- Leaflet CSS para el Mapa -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
     <style>
-        body { background: #0a0a0a; color: #fff; font-family: sans-serif; text-align: center; margin: 0; padding: 15px; }
-        h2 { color: #00ff88; margin: 5px 0 15px; letter-spacing: 2px; font-size: 1.5em; }
-        #btn-connect { background: #00b3ff; color: #000; border: none; padding: 12px 24px; border-radius: 8px; font-size: 1.1em; font-weight: bold; cursor: pointer; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0, 179, 255, 0.4); transition: 0.3s; }
+        * { box-sizing: border-box; }
+        body { background: #0a0a0a; color: #fff; font-family: sans-serif; text-align: center; margin: 0; padding: 12px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        h2 { color: #00ff88; margin: 0; letter-spacing: 1.5px; font-size: 1.2em; }
+        
+        #btn-connect { background: #00b3ff; color: #000; border: none; padding: 8px 16px; border-radius: 8px; font-size: 0.9em; font-weight: bold; cursor: pointer; box-shadow: 0 2px 10px rgba(0, 179, 255, 0.35); transition: 0.2s; }
         #btn-connect:active { transform: scale(0.95); }
+
+        /* Barra de Pestañas */
+        .tabs { display: flex; gap: 8px; margin-bottom: 14px; background: #161616; padding: 5px; border-radius: 10px; border: 1px solid #222; }
+        .tab-btn { flex: 1; background: transparent; color: #888; border: none; padding: 10px; border-radius: 7px; font-size: 0.95em; font-weight: bold; letter-spacing: 1px; cursor: pointer; transition: 0.2s; }
+        .tab-btn.active { background: #00b3ff; color: #000; }
+
+        /* Contenido de Pestañas */
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* Pestaña Motor */
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         .card { background: #161616; border-radius: 12px; padding: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); border: 2px solid #222; transition: 0.3s; }
-        #c-rpm { grid-column: span 2; padding: 20px; }
-        #c-rpm .val { font-size: 3.5em; margin-top: -40px; }
-        #c-rpm svg { max-height: 140px; }
+        #c-rpm { grid-column: span 2; padding: 18px; }
+        #c-rpm .val { font-size: 3.3em; margin-top: -38px; }
+        #c-rpm svg { max-height: 130px; }
         .alarm { animation: pulse 0.5s infinite alternate; border-color: #ff003c; }
         @keyframes pulse { from { box-shadow: 0 0 10px #300; } to { box-shadow: 0 0 25px #ff003c; transform: scale(1.02); } }
         svg { width: 100%; max-height: 75px; overflow: visible; margin: 10px 0; }
@@ -22,25 +41,68 @@
         .val { font-size: 1.8em; font-weight: bold; margin-top: -20px; }
         .unit { font-size: 0.4em; color: #888; margin-left: 3px; }
         .lbl { color: #aaa; font-size: 0.75em; text-transform: uppercase; letter-spacing: 1px; }
-        .gps-data { font-size: 1.3em; font-family: monospace; color: #00ff88; margin-top: 10px; line-height: 1.5; }
+
+        /* Pestaña Mapa */
+        #map-container { position: relative; border-radius: 12px; overflow: hidden; border: 2px solid #222; }
+        #map { width: 100%; height: 62vh; background: #111; }
+        .map-hud { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+        .hud-box { background: #161616; border: 1px solid #222; border-radius: 10px; padding: 10px; }
+        .hud-val { font-family: monospace; font-size: 1.1em; color: #00ff88; margin-top: 4px; font-weight: bold; }
+        .map-controls { display: flex; gap: 8px; margin-top: 10px; }
+        .ctrl-btn { flex: 1; background: #1c1c1c; color: #ddd; border: 1px solid #333; padding: 10px; border-radius: 8px; font-size: 0.85em; font-weight: bold; cursor: pointer; }
+        .ctrl-btn.on { border-color: #00ff88; color: #00ff88; }
     </style>
 </head>
 <body>
-    <h2>TELEMETRIA BLE</h2>
-    <button id="btn-connect">VINCULAR AUTO</button>
-    
-    <div class='grid' id='dash'></div>
 
-    <!-- Panel inferior para Datos GPS -->
-    <div class='card' style='margin-top: 15px; padding: 15px;'>
-        <div class='lbl'>SEÑAL GNSS (<span id="v-sats">0</span> SATS)</div>
-        <div class="gps-data">
-            LAT: <span id="v-lat">0.000000</span><br>
-            LON: <span id="v-lon">0.000000</span>
+    <div class="header">
+        <h2>TELEMETRÍA BLE</h2>
+        <button id="btn-connect">VINCULAR</button>
+    </div>
+
+    <!-- Selector de Pestañas -->
+    <div class="tabs">
+        <button class="tab-btn active" id="btn-tab-motor" onclick="switchTab('motor')">MOTOR</button>
+        <button class="tab-btn" id="btn-tab-mapa" onclick="switchTab('mapa')">MAPA</button>
+    </div>
+
+    <!-- PESTAÑA 1: MOTOR -->
+    <div id="tab-motor" class="tab-content active">
+        <div class='grid' id='dash'></div>
+    </div>
+
+    <!-- PESTAÑA 2: MAPA -->
+    <div id="tab-mapa" class="tab-content">
+        <div id="map-container">
+            <div id="map"></div>
+        </div>
+
+        <div class="map-hud">
+            <div class="hud-box">
+                <div class="lbl">VELOCIDAD OBD</div>
+                <div class="hud-val"><span id="m-spd">0</span> km/h</div>
+            </div>
+            <div class="hud-box">
+                <div class="lbl">SATÉLITES</div>
+                <div class="hud-val" id="v-sats">0</div>
+            </div>
+            <div class="hud-box" style="grid-column: span 2;">
+                <div class="lbl">COORDENADAS GNSS</div>
+                <div class="hud-val"><span id="v-lat">0.000000</span>, <span id="v-lon">0.000000</span></div>
+            </div>
+        </div>
+
+        <div class="map-controls">
+            <button class="ctrl-btn on" id="btn-follow" onclick="toggleFollow()">SEGUIR AUTO: ON</button>
+            <button class="ctrl-btn" onclick="clearRoute()">LIMPIAR RUTA</button>
         </div>
     </div>
 
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
     <script>
+        // --- 1. CONFIGURACIÓN DE MEDIDORES (MOTOR) ---
         const cfg = [
             { id: 'rpm', lbl: 'Motor', u: 'RPM', m0: 0, m1: 7000, w1: 4500, d1: 5500 },
             { id: 'spd', lbl: 'Velocidad', u: 'km/h', m0: 0, m1: 200, w1: 120, d1: 160 },
@@ -80,7 +142,75 @@
             document.getElementById('c-' + id).className = alm ? 'card alarm' : 'card';
         }
 
-        // Conexión Web Bluetooth
+        // --- 2. CONFIGURACIÓN DEL MAPA (LEAFLET) ---
+        let followCar = true;
+        let hasFirstFix = false;
+
+        // Inicia centrado en Zapopan/GDL hasta recibir primer fix GPS
+        const map = L.map('map', { zoomControl: false }).setView([20.7245, -103.3626], 15);
+        
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap &copy; CARTO'
+        }).addTo(map);
+
+        const carMarker = L.circleMarker([20.7245, -103.3626], {
+            radius: 8,
+            fillColor: '#00ff88',
+            color: '#ffffff',
+            weight: 2,
+            opacity: 1,
+            fillOpacity: 1
+        }).addTo(map);
+
+        const routeLine = L.polyline([], {
+            color: '#00b3ff',
+            weight: 4,
+            opacity: 0.85
+        }).addTo(map);
+
+        function updateMap(lat, lon) {
+            // Evitar saltar a (0,0) en el océano si aún no hay señal GPS
+            if (Math.abs(lat) < 0.01 && Math.abs(lon) < 0.01) return;
+
+            const pos = [lat, lon];
+            carMarker.setLatLng(pos);
+            routeLine.addLatLng(pos);
+
+            if (!hasFirstFix) {
+                map.setView(pos, 16);
+                hasFirstFix = true;
+            } else if (followCar) {
+                map.panTo(pos, { animate: true, duration: 0.5 });
+            }
+        }
+
+        function toggleFollow() {
+            followCar = !followCar;
+            const btn = document.getElementById('btn-follow');
+            btn.innerText = followCar ? 'SEGUIR AUTO: ON' : 'SEGUIR AUTO: OFF';
+            btn.className = followCar ? 'ctrl-btn on' : 'ctrl-btn';
+        }
+
+        function clearRoute() {
+            routeLine.setLatLngs([]);
+        }
+
+        // --- 3. CAMBIO DE PESTAÑAS ---
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+
+            document.getElementById('tab-' + tabName).classList.add('active');
+            document.getElementById('btn-tab-' + tabName).classList.add('active');
+
+            // Obligatorio para que Leaflet recalcule el tamaño al hacerse visible
+            if (tabName === 'mapa') {
+                setTimeout(() => map.invalidateSize(), 100);
+            }
+        }
+
+        // --- 4. CONEXIÓN WEB BLUETOOTH (19 BYTES) ---
         document.getElementById('btn-connect').addEventListener('click', async () => {
             try {
                 const device = await navigator.bluetooth.requestDevice({
@@ -94,15 +224,17 @@
                 
                 await characteristic.startNotifications();
                 
-                document.getElementById('btn-connect').style.background = '#00ff88';
-                document.getElementById('btn-connect').innerText = 'CONECTADO';
+                const btn = document.getElementById('btn-connect');
+                btn.style.background = '#00ff88';
+                btn.innerText = 'CONECTADO';
 
                 characteristic.addEventListener('characteristicvaluechanged', (e) => {
                     let v = new DataView(e.target.value.buffer);
                     
-                    // Decodificación estructurada de 19 bytes
-                    upd('rpm', v.getUint16(0, true)); // Little Endian
-                    upd('spd', v.getUint8(2));
+                    // Motor
+                    let spd = v.getUint8(2);
+                    upd('rpm', v.getUint16(0, true));
+                    upd('spd', spd);
                     upd('tmp', v.getInt8(3));
                     upd('bat', (v.getUint8(4) / 10.0).toFixed(1)); 
                     upd('load', v.getUint8(5));
@@ -111,15 +243,22 @@
                     upd('throt', v.getUint8(8));
                     upd('adv', v.getInt8(9));
 
-                    // Parámetros GPS (Little Endian por defecto en ESP32 floats)
-                    document.getElementById('v-lat').innerText = v.getFloat32(10, true).toFixed(6);
-                    document.getElementById('v-lon').innerText = v.getFloat32(14, true).toFixed(6);
-                    document.getElementById('v-sats').innerText = v.getUint8(18);
+                    // GPS
+                    let lat = v.getFloat32(10, true);
+                    let lon = v.getFloat32(14, true);
+                    let sats = v.getUint8(18);
+
+                    document.getElementById('m-spd').innerText = spd;
+                    document.getElementById('v-lat').innerText = lat.toFixed(6);
+                    document.getElementById('v-lon').innerText = lon.toFixed(6);
+                    document.getElementById('v-sats').innerText = sats;
+
+                    updateMap(lat, lon);
                 });
                 
                 device.addEventListener('gattserverdisconnected', () => {
-                    document.getElementById('btn-connect').style.background = '#ff003c';
-                    document.getElementById('btn-connect').innerText = 'RECONECTAR';
+                    btn.style.background = '#ff003c';
+                    btn.innerText = 'RECONECTAR';
                 });
 
             } catch (error) {
