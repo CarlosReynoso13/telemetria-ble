@@ -51,6 +51,7 @@
         .map-controls { display: flex; gap: 8px; margin-top: 10px; }
         .ctrl-btn { flex: 1; background: #1c1c1c; color: #ddd; border: 1px solid #333; padding: 10px; border-radius: 8px; font-size: 0.85em; font-weight: bold; cursor: pointer; }
         .ctrl-btn.on { border-color: #00ff88; color: #00ff88; }
+        .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%); }
     </style>
 </head>
 <body>
@@ -149,9 +150,9 @@
         // Inicia centrado en Zapopan/GDL hasta recibir primer fix GPS
         const map = L.map('map', { zoomControl: false }).setView([20.7245, -103.3626], 15);
         
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            maxZoom: 19,
-            attribution: '&copy; OpenStreetMap &copy; CARTO'
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap'
         }).addTo(map);
 
         const carMarker = L.circleMarker([20.7245, -103.3626], {
