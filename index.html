@@ -54,7 +54,6 @@
 
         /* Pestaña Mapa con soporte de rotación */
         #map-container { position: relative; width: 100%; height: 60vh; border-radius: 12px; overflow: hidden; border: 2px solid #222; background: #111; }
-        /* El mapa es 150% más grande para que no se vean bordes vacíos al rotar */
         #map { position: absolute; width: 150%; height: 150%; top: -25%; left: -25%; background: #111; transition: transform 0.6s ease-out; transform-origin: center center; }
         .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%); }
         
@@ -106,7 +105,7 @@
                 <div class="hud-val"><span id="m-spd">0</span> km/h</div>
             </div>
             <div class="hud-box">
-                <div class="lbl">FUENTE GPS</div>
+                <div class="lbl">ESTADO FIX GPS</div>
                 <div class="hud-val" id="v-gps-src">CONSULTANDO...</div>
             </div>
             <div class="hud-box" style="grid-column: span 2;">
@@ -180,7 +179,6 @@
             maxZoom: 19
         }).addTo(map);
 
-        // Marcador tipo flecha de navegación
         const carIcon = L.divIcon({
             className: 'car-arrow-icon',
             html: `<svg id="car-arrow" class="car-arrow-svg" viewBox="0 0 36 36">
@@ -196,7 +194,6 @@
             color: '#00b3ff', weight: 4, opacity: 0.85
         }).addTo(map);
 
-        // Matemáticas de distancia y rumbo (azimut)
         function calcDistanceM(lat1, lon1, lat2, lon2) {
             const R = 6371000;
             const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -232,7 +229,6 @@
         function updateMap(lat, lon, sourceLabel, satsCount) {
             if (Math.abs(lat) < 0.01 && Math.abs(lon) < 0.01) return;
 
-            // Calcular rumbo solo si el auto se movió más de 4 metros
             if (lastPos) {
                 const dist = calcDistanceM(lastPos[0], lastPos[1], lat, lon);
                 if (dist > 4.0) {
@@ -263,6 +259,17 @@
         // --- 3. CONSULTA REMOTA A LA NUBE (GOOGLE SHEETS) ---
         const CLOUD_URL = "https://script.google.com/macros/s/AKfycbxdT-jvtJnbUrmV6-dacKz-dSzLexkrbpvoSo-Cd3QqSMdVCFCuf8bz2iJyLIEvdNFbhw/exec";
 
+        function formatTimeAgo(isoString) {
+            const past = new Date(isoString);
+            if (isNaN(past.getTime())) return isoString;
+            const diffSec = Math.max(0, Math.floor((Date.now() - past.getTime()) / 1000));
+            if (diffSec < 60) return `hace ${diffSec}s`;
+            const diffMin = Math.floor(diffSec / 60);
+            if (diffMin < 60) return `hace ${diffMin} min`;
+            const diffHrs = Math.floor(diffMin / 60);
+            return `hace ${diffHrs}h ${diffMin % 60}m`;
+        }
+
         async function fetchCloudLocation() {
             if (bleHasValidGps) return;
 
@@ -271,13 +278,25 @@
                 const data = await res.json();
 
                 if (data.lat && data.lon) {
-                    document.getElementById('m-spd').innerText = Math.round(data.spd || 0);
-                    const label = data.timestamp ? `NUBE (${data.timestamp})` : 'AUTO (NUBE)';
-                    updateMap(data.lat, data.lon, label, data.sats ?? '--');
+                    const past = new Date(data.timestamp);
+                    const ageSec = isNaN(past.getTime()) ? 9999 : (Date.now() - past.getTime()) / 1000;
+                    const isLive = ageSec < 120;
+
+                    const srcEl = document.getElementById('v-gps-src');
+                    srcEl.style.color = isLive ? '#00ff88' : '#ffaa00';
+
+                    const label = isLive
+                        ? `FIX NUBE (${formatTimeAgo(data.timestamp)})`
+                        : `SIN FIX VIVO (${formatTimeAgo(data.timestamp)})`;
+
+                    document.getElementById('m-spd').innerText = isLive ? Math.round(data.spd || 0) : 0;
+                    updateMap(data.lat, data.lon, label, isLive ? (data.sats ?? 0) : `0 (últ: ${data.sats})`);
                 }
             } catch (err) {
                 console.warn("Error leyendo ubicación de la nube:", err);
-                document.getElementById('v-gps-src').innerText = "NUBE OFFLINE";
+                const srcEl = document.getElementById('v-gps-src');
+                srcEl.style.color = '#ff003c';
+                srcEl.innerText = "NUBE OFFLINE";
             }
         }
 
@@ -384,10 +403,14 @@
 
             if (Math.abs(lat) > 0.01 && Math.abs(lon) > 0.01) {
                 bleHasValidGps = true;
+                document.getElementById('v-gps-src').style.color = '#00ff88';
                 document.getElementById('m-spd').innerText = spd;
-                updateMap(lat, lon, 'AUTO (BLE)', sats);
+                updateMap(lat, lon, 'FIX VIVO (BLE)', sats);
             } else {
                 bleHasValidGps = false;
+                document.getElementById('v-gps-src').style.color = '#ff003c';
+                document.getElementById('v-gps-src').innerText = 'BLE: SIN FIX';
+                document.getElementById('v-sats').innerText = sats;
             }
         }
 
