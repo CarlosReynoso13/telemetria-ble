@@ -12,10 +12,19 @@
         * { box-sizing: border-box; }
         body { background: #0a0a0a; color: #fff; font-family: sans-serif; text-align: center; margin: 0; padding: 12px; }
         
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-        h2 { color: #00ff88; margin: 0; letter-spacing: 1.5px; font-size: 1.2em; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 8px; }
+        .title-group { display: flex; align-items: center; gap: 8px; }
+        h2 { color: #00ff88; margin: 0; letter-spacing: 1.2px; font-size: 1.1em; }
         
-        #btn-connect { background: #00b3ff; color: #000; border: none; padding: 8px 16px; border-radius: 8px; font-size: 0.9em; font-weight: bold; cursor: pointer; box-shadow: 0 2px 10px rgba(0, 179, 255, 0.35); transition: 0.2s; }
+        /* Indicador Heartbeat */
+        .hb-pill { display: flex; align-items: center; gap: 6px; background: #161616; border: 1px solid #333; padding: 4px 10px; border-radius: 20px; font-size: 0.72em; font-weight: bold; color: #aaa; }
+        .hb-dot { width: 9px; height: 9px; border-radius: 50%; background: #555; transition: background 0.15s, box-shadow 0.15s; }
+        .hb-dot.alive { background: #00ff88; box-shadow: 0 0 8px #00ff88; }
+        .hb-dot.pulse { background: #ffffff; box-shadow: 0 0 12px #00ff88; }
+        .hb-dot.dead { background: #ff003c; box-shadow: 0 0 10px #ff003c; animation: blink 0.6s infinite; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+
+        #btn-connect { background: #00b3ff; color: #000; border: none; padding: 8px 14px; border-radius: 8px; font-size: 0.85em; font-weight: bold; cursor: pointer; box-shadow: 0 2px 10px rgba(0, 179, 255, 0.35); transition: 0.2s; }
         #btn-connect:active { transform: scale(0.95); }
 
         /* Barra de Pestañas */
@@ -28,7 +37,8 @@
         .tab-content.active { display: block; }
 
         /* Pestaña Motor */
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; transition: opacity 0.3s; }
+        .grid.stale { opacity: 0.35; } /* Atenúa los relojes si se congela el BLE */
         .card { background: #161616; border-radius: 12px; padding: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); border: 2px solid #222; transition: 0.3s; }
         #c-rpm { grid-column: span 2; padding: 18px; }
         #c-rpm .val { font-size: 3.3em; margin-top: -38px; }
@@ -44,20 +54,26 @@
 
         /* Pestaña Mapa */
         #map-container { position: relative; border-radius: 12px; overflow: hidden; border: 2px solid #222; }
-        #map { width: 100%; height: 62vh; background: #111; }
+        #map { width: 100%; height: 60vh; background: #111; }
+        .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%); }
         .map-hud { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
         .hud-box { background: #161616; border: 1px solid #222; border-radius: 10px; padding: 10px; }
-        .hud-val { font-family: monospace; font-size: 1.1em; color: #00ff88; margin-top: 4px; font-weight: bold; }
+        .hud-val { font-family: monospace; font-size: 1.05em; color: #00ff88; margin-top: 4px; font-weight: bold; }
         .map-controls { display: flex; gap: 8px; margin-top: 10px; }
         .ctrl-btn { flex: 1; background: #1c1c1c; color: #ddd; border: 1px solid #333; padding: 10px; border-radius: 8px; font-size: 0.85em; font-weight: bold; cursor: pointer; }
         .ctrl-btn.on { border-color: #00ff88; color: #00ff88; }
-        .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%); }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <h2>TELEMETRÍA BLE</h2>
+        <div class="title-group">
+            <h2>TIIDA PRO</h2>
+            <div class="hb-pill">
+                <div class="hb-dot" id="hb-dot"></div>
+                <span id="hb-text">OFFLINE</span>
+            </div>
+        </div>
         <button id="btn-connect">VINCULAR</button>
     </div>
 
@@ -69,7 +85,7 @@
 
     <!-- PESTAÑA 1: MOTOR -->
     <div id="tab-motor" class="tab-content active">
-        <div class='grid' id='dash'></div>
+        <div class='grid stale' id='dash'></div>
     </div>
 
     <!-- PESTAÑA 2: MAPA -->
@@ -80,21 +96,21 @@
 
         <div class="map-hud">
             <div class="hud-box">
-                <div class="lbl">VELOCIDAD OBD</div>
+                <div class="lbl">VELOCIDAD</div>
                 <div class="hud-val"><span id="m-spd">0</span> km/h</div>
             </div>
             <div class="hud-box">
-                <div class="lbl">SATÉLITES</div>
-                <div class="hud-val" id="v-sats">0</div>
+                <div class="lbl">FUENTE GPS</div>
+                <div class="hud-val" id="v-gps-src">BUSCANDO...</div>
             </div>
             <div class="hud-box" style="grid-column: span 2;">
-                <div class="lbl">COORDENADAS GNSS</div>
+                <div class="lbl">COORDENADAS (<span id="v-sats">0</span> SATS)</div>
                 <div class="hud-val"><span id="v-lat">0.000000</span>, <span id="v-lon">0.000000</span></div>
             </div>
         </div>
 
         <div class="map-controls">
-            <button class="ctrl-btn on" id="btn-follow" onclick="toggleFollow()">SEGUIR AUTO: ON</button>
+            <button class="ctrl-btn on" id="btn-follow" onclick="toggleFollow()">SEGUIR: ON</button>
             <button class="ctrl-btn" onclick="clearRoute()">LIMPIAR RUTA</button>
         </div>
     </div>
@@ -143,40 +159,37 @@
             document.getElementById('c-' + id).className = alm ? 'card alarm' : 'card';
         }
 
-        // --- 2. CONFIGURACIÓN DEL MAPA (LEAFLET) ---
+        // --- 2. CONFIGURACIÓN DEL MAPA (OPENSTREETMAP OSCURO) ---
         let followCar = true;
         let hasFirstFix = false;
+        let bleHasValidGps = false;
 
-        // Inicia centrado en Zapopan/GDL hasta recibir primer fix GPS
         const map = L.map('map', { zoomControl: false }).setView([20.7245, -103.3626], 15);
         
         L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap'
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap'
         }).addTo(map);
 
         const carMarker = L.circleMarker([20.7245, -103.3626], {
-            radius: 8,
-            fillColor: '#00ff88',
-            color: '#ffffff',
-            weight: 2,
-            opacity: 1,
-            fillOpacity: 1
+            radius: 8, fillColor: '#00ff88', color: '#ffffff', weight: 2, opacity: 1, fillOpacity: 1
         }).addTo(map);
 
         const routeLine = L.polyline([], {
-            color: '#00b3ff',
-            weight: 4,
-            opacity: 0.85
+            color: '#00b3ff', weight: 4, opacity: 0.85
         }).addTo(map);
 
-        function updateMap(lat, lon) {
-            // Evitar saltar a (0,0) en el océano si aún no hay señal GPS
+        function updateMap(lat, lon, sourceLabel, satsCount) {
             if (Math.abs(lat) < 0.01 && Math.abs(lon) < 0.01) return;
 
             const pos = [lat, lon];
             carMarker.setLatLng(pos);
             routeLine.addLatLng(pos);
+
+            document.getElementById('v-lat').innerText = lat.toFixed(6);
+            document.getElementById('v-lon').innerText = lon.toFixed(6);
+            document.getElementById('v-gps-src').innerText = sourceLabel;
+            if (satsCount !== null) document.getElementById('v-sats').innerText = satsCount;
 
             if (!hasFirstFix) {
                 map.setView(pos, 16);
@@ -186,10 +199,27 @@
             }
         }
 
+        // GPS Independiente del Teléfono (activo siempre que el BLE no entregue GPS válido)
+        if ('geolocation' in navigator) {
+            navigator.geolocation.watchPosition(
+                (pos) => {
+                    if (!bleHasValidGps) {
+                        const lat = pos.coords.latitude;
+                        const lon = pos.coords.longitude;
+                        const spdKmh = pos.coords.speed ? Math.round(pos.coords.speed * 3.6) : 0;
+                        document.getElementById('m-spd').innerText = spdKmh;
+                        updateMap(lat, lon, 'TELÉFONO', '--');
+                    }
+                },
+                (err) => { console.warn('GPS Teléfono:', err.message); },
+                { enableHighAccuracy: true, maximumAge: 2000, timeout: 5000 }
+            );
+        }
+
         function toggleFollow() {
             followCar = !followCar;
             const btn = document.getElementById('btn-follow');
-            btn.innerText = followCar ? 'SEGUIR AUTO: ON' : 'SEGUIR AUTO: OFF';
+            btn.innerText = followCar ? 'SEGUIR: ON' : 'SEGUIR: OFF';
             btn.className = followCar ? 'ctrl-btn on' : 'ctrl-btn';
         }
 
@@ -197,74 +227,145 @@
             routeLine.setLatLngs([]);
         }
 
-        // --- 3. CAMBIO DE PESTAÑAS ---
         function switchTab(tabName) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-
             document.getElementById('tab-' + tabName).classList.add('active');
             document.getElementById('btn-tab-' + tabName).classList.add('active');
+            if (tabName === 'mapa') setTimeout(() => map.invalidateSize(), 100);
+        }
 
-            // Obligatorio para que Leaflet recalcule el tamaño al hacerse visible
-            if (tabName === 'mapa') {
-                setTimeout(() => map.invalidateSize(), 100);
+        // --- 3. GESTIÓN BLE CON HEARTBEAT Y RECONEXIÓN AUTOMÁTICA ---
+        let bleDevice = null;
+        let lastPacketTime = 0;
+        let isReconnecting = false;
+        let reconnectTimer = null;
+
+        const btnConnect = document.getElementById('btn-connect');
+        const hbDot = document.getElementById('hb-dot');
+        const hbText = document.getElementById('hb-text');
+        const dashEl = document.getElementById('dash');
+
+        function setBleStatus(state) {
+            if (state === 'alive') {
+                btnConnect.style.background = '#00ff88';
+                btnConnect.innerText = 'EN LÍNEA';
+                hbDot.className = 'hb-dot alive';
+                hbText.innerText = 'EN VIVO';
+                hbText.style.color = '#00ff88';
+                dashEl.classList.remove('stale');
+            } else if (state === 'reconnecting') {
+                btnConnect.style.background = '#ffaa00';
+                btnConnect.innerText = 'BUSCANDO...';
+                hbDot.className = 'hb-dot dead';
+                hbText.innerText = 'RECONECTANDO';
+                hbText.style.color = '#ffaa00';
+                dashEl.classList.add('stale');
+                bleHasValidGps = false;
+            } else {
+                btnConnect.style.background = '#ff003c';
+                btnConnect.innerText = 'SIN SEÑAL';
+                hbDot.className = 'hb-dot dead';
+                hbText.innerText = 'CAÍDO';
+                hbText.style.color = '#ff003c';
+                dashEl.classList.add('stale');
+                bleHasValidGps = false;
             }
         }
 
-        // --- 4. CONEXIÓN WEB BLUETOOTH (19 BYTES) ---
-        document.getElementById('btn-connect').addEventListener('click', async () => {
+        function onBlePacket(e) {
+            lastPacketTime = Date.now();
+            setBleStatus('alive');
+
+            // Destello breve del LED por cada paquete recibido
+            hbDot.className = 'hb-dot pulse';
+            setTimeout(() => { if (Date.now() - lastPacketTime < 3500) hbDot.className = 'hb-dot alive'; }, 150);
+
+            let v = new DataView(e.target.value.buffer);
+            
+            let spd = v.getUint8(2);
+            upd('rpm', v.getUint16(0, true));
+            upd('spd', spd);
+            upd('tmp', v.getInt8(3));
+            upd('bat', (v.getUint8(4) / 10.0).toFixed(1)); 
+            upd('load', v.getUint8(5));
+            upd('iat', v.getInt8(6));
+            upd('maf', v.getUint8(7));
+            upd('throt', v.getUint8(8));
+            upd('adv', v.getInt8(9));
+
+            let lat = v.getFloat32(10, true);
+            let lon = v.getFloat32(14, true);
+            let sats = v.getUint8(18);
+
+            if (Math.abs(lat) > 0.01 && Math.abs(lon) > 0.01) {
+                bleHasValidGps = true;
+                document.getElementById('m-spd').innerText = spd;
+                updateMap(lat, lon, 'AUTO (BLE)', sats);
+            } else {
+                bleHasValidGps = false;
+            }
+        }
+
+        async function connectGatt() {
+            if (!bleDevice || isReconnecting) return;
+            isReconnecting = true;
+            setBleStatus('reconnecting');
+
             try {
-                const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ name: 'Auto_Tracker_BLE' }],
-                    optionalServices: ['000000ff-0000-1000-8000-00805f9b34fb']
-                });
-                
-                const server = await device.gatt.connect();
+                const server = await bleDevice.gatt.connect();
                 const service = await server.getPrimaryService('000000ff-0000-1000-8000-00805f9b34fb');
                 const characteristic = await service.getCharacteristic('0000ff01-0000-1000-8000-00805f9b34fb');
                 
+                characteristic.removeEventListener('characteristicvaluechanged', onBlePacket);
+                characteristic.addEventListener('characteristicvaluechanged', onBlePacket);
                 await characteristic.startNotifications();
                 
-                const btn = document.getElementById('btn-connect');
-                btn.style.background = '#00ff88';
-                btn.innerText = 'CONECTADO';
+                lastPacketTime = Date.now();
+                isReconnecting = false;
+                setBleStatus('alive');
+            } catch (err) {
+                isReconnecting = false;
+                setBleStatus('dead');
+                scheduleReconnect();
+            }
+        }
 
-                characteristic.addEventListener('characteristicvaluechanged', (e) => {
-                    let v = new DataView(e.target.value.buffer);
-                    
-                    // Motor
-                    let spd = v.getUint8(2);
-                    upd('rpm', v.getUint16(0, true));
-                    upd('spd', spd);
-                    upd('tmp', v.getInt8(3));
-                    upd('bat', (v.getUint8(4) / 10.0).toFixed(1)); 
-                    upd('load', v.getUint8(5));
-                    upd('iat', v.getInt8(6));
-                    upd('maf', v.getUint8(7));
-                    upd('throt', v.getUint8(8));
-                    upd('adv', v.getInt8(9));
+        function scheduleReconnect() {
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(() => {
+                if (bleDevice && !bleDevice.gatt.connected) {
+                    connectGatt();
+                }
+            }, 3000);
+        }
 
-                    // GPS
-                    let lat = v.getFloat32(10, true);
-                    let lon = v.getFloat32(14, true);
-                    let sats = v.getUint8(18);
+        // Watchdog: revisa cada segundo si los datos se congelaron (> 3.5s sin paquetes)
+        setInterval(() => {
+            if (bleDevice && lastPacketTime > 0 && (Date.now() - lastPacketTime > 3500)) {
+                setBleStatus('dead');
+                if (!isReconnecting) {
+                    try { bleDevice.gatt.disconnect(); } catch (e) {}
+                    scheduleReconnect();
+                }
+            }
+        }, 1000);
 
-                    document.getElementById('m-spd').innerText = spd;
-                    document.getElementById('v-lat').innerText = lat.toFixed(6);
-                    document.getElementById('v-lon').innerText = lon.toFixed(6);
-                    document.getElementById('v-sats').innerText = sats;
-
-                    updateMap(lat, lon);
-                });
-                
-                device.addEventListener('gattserverdisconnected', () => {
-                    btn.style.background = '#ff003c';
-                    btn.innerText = 'RECONECTAR';
-                });
-
+        btnConnect.addEventListener('click', async () => {
+            try {
+                if (!bleDevice) {
+                    bleDevice = await navigator.bluetooth.requestDevice({
+                        filters: [{ name: 'Auto_Tracker_BLE' }],
+                        optionalServices: ['000000ff-0000-1000-8000-00805f9b34fb']
+                    });
+                    bleDevice.addEventListener('gattserverdisconnected', () => {
+                        setBleStatus('reconnecting');
+                        scheduleReconnect();
+                    });
+                }
+                await connectGatt();
             } catch (error) {
                 console.log(error);
-                alert("Error: " + error);
             }
         });
     </script>
