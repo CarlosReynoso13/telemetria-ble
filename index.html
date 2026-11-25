@@ -52,15 +52,21 @@
         .unit { font-size: 0.4em; color: #888; margin-left: 3px; }
         .lbl { color: #aaa; font-size: 0.75em; text-transform: uppercase; letter-spacing: 1px; }
 
-        /* Pestaña Mapa */
-        #map-container { position: relative; border-radius: 12px; overflow: hidden; border: 2px solid #222; }
-        #map { width: 100%; height: 60vh; background: #111; }
+        /* Pestaña Mapa con soporte de rotación */
+        #map-container { position: relative; width: 100%; height: 60vh; border-radius: 12px; overflow: hidden; border: 2px solid #222; background: #111; }
+        /* El mapa es 150% más grande para que no se vean bordes vacíos al rotar */
+        #map { position: absolute; width: 150%; height: 150%; top: -25%; left: -25%; background: #111; transition: transform 0.6s ease-out; transform-origin: center center; }
         .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%); }
+        
+        /* Flecha de navegación del vehículo */
+        .car-arrow-icon { background: transparent; border: none; }
+        .car-arrow-svg { width: 34px; height: 34px; filter: drop-shadow(0 0 6px #00ff88); transition: transform 0.4s ease-out; }
+
         .map-hud { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
         .hud-box { background: #161616; border: 1px solid #222; border-radius: 10px; padding: 10px; }
         .hud-val { font-family: monospace; font-size: 0.95em; color: #00ff88; margin-top: 4px; font-weight: bold; word-break: break-word; }
         .map-controls { display: flex; gap: 8px; margin-top: 10px; }
-        .ctrl-btn { flex: 1; background: #1c1c1c; color: #ddd; border: 1px solid #333; padding: 10px; border-radius: 8px; font-size: 0.85em; font-weight: bold; cursor: pointer; }
+        .ctrl-btn { flex: 1; background: #1c1c1c; color: #ddd; border: 1px solid #333; padding: 10px 6px; border-radius: 8px; font-size: 0.8em; font-weight: bold; cursor: pointer; }
         .ctrl-btn.on { border-color: #00ff88; color: #00ff88; }
     </style>
 </head>
@@ -111,7 +117,8 @@
 
         <div class="map-controls">
             <button class="ctrl-btn on" id="btn-follow" onclick="toggleFollow()">SEGUIR: ON</button>
-            <button class="ctrl-btn" onclick="clearRoute()">LIMPIAR RUTA</button>
+            <button class="ctrl-btn on" id="btn-heading" onclick="toggleHeading()">RUMBO: ON</button>
+            <button class="ctrl-btn" onclick="clearRoute()">LIMPIAR</button>
         </div>
     </div>
 
@@ -159,32 +166,86 @@
             document.getElementById('c-' + id).className = alm ? 'card alarm' : 'card';
         }
 
-        // --- 2. CONFIGURACIÓN DEL MAPA (OPENSTREETMAP OSCURO) ---
+        // --- 2. CONFIGURACIÓN DEL MAPA (OPENSTREETMAP OSCURO + RUMBO) ---
         let followCar = true;
+        let headingUp = true;
         let hasFirstFix = false;
         let bleHasValidGps = false;
+        let lastPos = null;
+        let currentBearing = 0;
 
-        const map = L.map('map', { zoomControl: false }).setView([20.7245, -103.3626], 15);
+        const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([20.7245, -103.3626], 16);
         
         L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '&copy; OpenStreetMap'
+            maxZoom: 19
         }).addTo(map);
 
-        const carMarker = L.circleMarker([20.7245, -103.3626], {
-            radius: 8, fillColor: '#00ff88', color: '#ffffff', weight: 2, opacity: 1, fillOpacity: 1
-        }).addTo(map);
+        // Marcador tipo flecha de navegación
+        const carIcon = L.divIcon({
+            className: 'car-arrow-icon',
+            html: `<svg id="car-arrow" class="car-arrow-svg" viewBox="0 0 36 36">
+                     <polygon points="18,2 32,32 18,25 4,32" fill="#00ff88" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"/>
+                   </svg>`,
+            iconSize: [34, 34],
+            iconAnchor: [17, 17]
+        });
+
+        const carMarker = L.marker([20.7245, -103.3626], { icon: carIcon, zIndexOffset: 1000 }).addTo(map);
 
         const routeLine = L.polyline([], {
             color: '#00b3ff', weight: 4, opacity: 0.85
         }).addTo(map);
 
+        // Matemáticas de distancia y rumbo (azimut)
+        function calcDistanceM(lat1, lon1, lat2, lon2) {
+            const R = 6371000;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) ** 2 +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon / 2) ** 2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+
+        function calcBearing(lat1, lon1, lat2, lon2) {
+            const toRad = d => d * Math.PI / 180;
+            const toDeg = r => r * 180 / Math.PI;
+            const dLon = toRad(lon2 - lon1);
+            const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+            const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+                      Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+            return (toDeg(Math.atan2(y, x)) + 360) % 360;
+        }
+
+        function applyMapRotation() {
+            const mapEl = document.getElementById('map');
+            const arrowEl = document.getElementById('car-arrow');
+            if (headingUp && followCar) {
+                mapEl.style.transform = `rotate(${-currentBearing}deg)`;
+                if (arrowEl) arrowEl.style.transform = `rotate(${currentBearing}deg)`;
+            } else {
+                mapEl.style.transform = `rotate(0deg)`;
+                if (arrowEl) arrowEl.style.transform = `rotate(${currentBearing}deg)`;
+            }
+        }
+
         function updateMap(lat, lon, sourceLabel, satsCount) {
             if (Math.abs(lat) < 0.01 && Math.abs(lon) < 0.01) return;
 
+            // Calcular rumbo solo si el auto se movió más de 4 metros
+            if (lastPos) {
+                const dist = calcDistanceM(lastPos[0], lastPos[1], lat, lon);
+                if (dist > 4.0) {
+                    currentBearing = calcBearing(lastPos[0], lastPos[1], lat, lon);
+                }
+            }
+
             const pos = [lat, lon];
+            lastPos = pos;
+
             carMarker.setLatLng(pos);
             routeLine.addLatLng(pos);
+            applyMapRotation();
 
             document.getElementById('v-lat').innerText = lat.toFixed(6);
             document.getElementById('v-lon').innerText = lon.toFixed(6);
@@ -192,7 +253,7 @@
             if (satsCount !== null) document.getElementById('v-sats').innerText = satsCount;
 
             if (!hasFirstFix) {
-                map.setView(pos, 16);
+                map.setView(pos, 16, { animate: false });
                 hasFirstFix = true;
             } else if (followCar) {
                 map.panTo(pos, { animate: true, duration: 0.5 });
@@ -220,7 +281,6 @@
             }
         }
 
-        // Consultar al abrir y cada 15 segundos mientras no haya BLE activo
         fetchCloudLocation();
         setInterval(fetchCloudLocation, 15000);
 
@@ -229,6 +289,16 @@
             const btn = document.getElementById('btn-follow');
             btn.innerText = followCar ? 'SEGUIR: ON' : 'SEGUIR: OFF';
             btn.className = followCar ? 'ctrl-btn on' : 'ctrl-btn';
+            applyMapRotation();
+            if (followCar && lastPos) map.panTo(lastPos);
+        }
+
+        function toggleHeading() {
+            headingUp = !headingUp;
+            const btn = document.getElementById('btn-heading');
+            btn.innerText = headingUp ? 'RUMBO: ON' : 'RUMBO: OFF';
+            btn.className = headingUp ? 'ctrl-btn on' : 'ctrl-btn';
+            applyMapRotation();
         }
 
         function clearRoute() {
@@ -240,7 +310,14 @@
             document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
             document.getElementById('tab-' + tabName).classList.add('active');
             document.getElementById('btn-tab-' + tabName).classList.add('active');
-            if (tabName === 'mapa') setTimeout(() => map.invalidateSize(), 100);
+            
+            if (tabName === 'mapa') {
+                setTimeout(() => {
+                    map.invalidateSize();
+                    if (lastPos) map.setView(lastPos, map.getZoom(), { animate: false });
+                    applyMapRotation();
+                }, 120);
+            }
         }
 
         // --- 4. GESTIÓN BLE CON HEARTBEAT Y RECONEXIÓN AUTOMÁTICA ---
@@ -347,7 +424,6 @@
             }, 3000);
         }
 
-        // Watchdog: detecta si el BLE se congeló (> 3.5s sin paquetes)
         setInterval(() => {
             if (bleDevice && lastPacketTime > 0 && (Date.now() - lastPacketTime > 3500)) {
                 setBleStatus('dead');
