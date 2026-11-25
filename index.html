@@ -12,19 +12,19 @@
         * { box-sizing: border-box; }
         body { background: #0a0a0a; color: #fff; font-family: sans-serif; text-align: center; margin: 0; padding: 12px; }
         
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 8px; }
-        .title-group { display: flex; align-items: center; gap: 8px; }
-        h2 { color: #00ff88; margin: 0; letter-spacing: 1.2px; font-size: 1.1em; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 6px; flex-wrap: wrap; }
+        .title-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        h2 { color: #00ff88; margin: 0; letter-spacing: 1.2px; font-size: 1.05em; }
         
-        /* Indicador Heartbeat */
-        .hb-pill { display: flex; align-items: center; gap: 6px; background: #161616; border: 1px solid #333; padding: 4px 10px; border-radius: 20px; font-size: 0.72em; font-weight: bold; color: #aaa; }
-        .hb-dot { width: 9px; height: 9px; border-radius: 50%; background: #555; transition: background 0.15s, box-shadow 0.15s; }
+        /* Indicadores Heartbeat y Batería Rastreador */
+        .hb-pill { display: flex; align-items: center; gap: 5px; background: #161616; border: 1px solid #333; padding: 4px 8px; border-radius: 20px; font-size: 0.72em; font-weight: bold; color: #aaa; }
+        .hb-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; transition: background 0.15s, box-shadow 0.15s; }
         .hb-dot.alive { background: #00ff88; box-shadow: 0 0 8px #00ff88; }
         .hb-dot.pulse { background: #ffffff; box-shadow: 0 0 12px #00ff88; }
         .hb-dot.dead { background: #ff003c; box-shadow: 0 0 10px #ff003c; animation: blink 0.6s infinite; }
         @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
 
-        #btn-connect { background: #00b3ff; color: #000; border: none; padding: 8px 14px; border-radius: 8px; font-size: 0.85em; font-weight: bold; cursor: pointer; box-shadow: 0 2px 10px rgba(0, 179, 255, 0.35); transition: 0.2s; }
+        #btn-connect { background: #00b3ff; color: #000; border: none; padding: 8px 12px; border-radius: 8px; font-size: 0.82em; font-weight: bold; cursor: pointer; box-shadow: 0 2px 10px rgba(0, 179, 255, 0.35); transition: 0.2s; }
         #btn-connect:active { transform: scale(0.95); }
 
         /* Barra de Pestañas */
@@ -77,6 +77,9 @@
             <div class="hb-pill">
                 <div class="hb-dot" id="hb-dot"></div>
                 <span id="hb-text">OFFLINE</span>
+            </div>
+            <div class="hb-pill" title="Batería interna del rastreador">
+                ⚡ <span id="v-trk-bat">--</span>
             </div>
         </div>
         <button id="btn-connect">VINCULAR</button>
@@ -163,6 +166,22 @@
             
             document.getElementById('p-' + id).style.stroke = col;
             document.getElementById('c-' + id).className = alm ? 'card alarm' : 'card';
+        }
+
+        function updateTrackerBat(v) {
+            const el = document.getElementById('v-trk-bat');
+            if (isNaN(v) || v <= 0) {
+                el.innerText = '--';
+                el.style.color = '#aaa';
+                return;
+            }
+            if (v < 2.0) {
+                el.innerText = 'USB';
+                el.style.color = '#00b3ff';
+                return;
+            }
+            el.innerText = v.toFixed(2) + 'V';
+            el.style.color = v < 3.65 ? '#ff003c' : (v < 3.75 ? '#ffaa00' : '#00ff88');
         }
 
         // --- 2. CONFIGURACIÓN DEL MAPA (OPENSTREETMAP OSCURO + RUMBO) ---
@@ -271,11 +290,15 @@
         }
 
         async function fetchCloudLocation() {
-            if (bleHasValidGps) return;
-
             try {
                 const res = await fetch(CLOUD_URL);
                 const data = await res.json();
+
+                if (data.trk_bat !== undefined) {
+                    updateTrackerBat(Number(data.trk_bat));
+                }
+
+                if (bleHasValidGps) return;
 
                 if (data.lat && data.lon) {
                     const past = new Date(data.timestamp);
@@ -294,9 +317,11 @@
                 }
             } catch (err) {
                 console.warn("Error leyendo ubicación de la nube:", err);
-                const srcEl = document.getElementById('v-gps-src');
-                srcEl.style.color = '#ff003c';
-                srcEl.innerText = "NUBE OFFLINE";
+                if (!bleHasValidGps) {
+                    const srcEl = document.getElementById('v-gps-src');
+                    srcEl.style.color = '#ff003c';
+                    srcEl.innerText = "NUBE OFFLINE";
+                }
             }
         }
 
@@ -339,7 +364,7 @@
             }
         }
 
-        // --- 4. GESTIÓN BLE CON HEARTBEAT Y RECONEXIÓN AUTOMÁTICA ---
+        // --- 4. GESTIÓN BLE (19 BYTES) CON HEARTBEAT Y RECONEXIÓN AUTOMÁTICA ---
         let bleDevice = null;
         let lastPacketTime = 0;
         let isReconnecting = false;
