@@ -38,7 +38,7 @@
 
         /* Pestaña Motor */
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; transition: opacity 0.3s; }
-        .grid.stale { opacity: 0.35; } /* Atenúa los relojes si se congela el BLE */
+        .grid.stale { opacity: 0.35; }
         .card { background: #161616; border-radius: 12px; padding: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); border: 2px solid #222; transition: 0.3s; }
         #c-rpm { grid-column: span 2; padding: 18px; }
         #c-rpm .val { font-size: 3.3em; margin-top: -38px; }
@@ -58,7 +58,7 @@
         .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%); }
         .map-hud { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
         .hud-box { background: #161616; border: 1px solid #222; border-radius: 10px; padding: 10px; }
-        .hud-val { font-family: monospace; font-size: 1.05em; color: #00ff88; margin-top: 4px; font-weight: bold; }
+        .hud-val { font-family: monospace; font-size: 0.95em; color: #00ff88; margin-top: 4px; font-weight: bold; word-break: break-word; }
         .map-controls { display: flex; gap: 8px; margin-top: 10px; }
         .ctrl-btn { flex: 1; background: #1c1c1c; color: #ddd; border: 1px solid #333; padding: 10px; border-radius: 8px; font-size: 0.85em; font-weight: bold; cursor: pointer; }
         .ctrl-btn.on { border-color: #00ff88; color: #00ff88; }
@@ -101,7 +101,7 @@
             </div>
             <div class="hud-box">
                 <div class="lbl">FUENTE GPS</div>
-                <div class="hud-val" id="v-gps-src">BUSCANDO...</div>
+                <div class="hud-val" id="v-gps-src">CONSULTANDO...</div>
             </div>
             <div class="hud-box" style="grid-column: span 2;">
                 <div class="lbl">COORDENADAS (<span id="v-sats">0</span> SATS)</div>
@@ -199,22 +199,30 @@
             }
         }
 
-        // GPS Independiente del Teléfono (activo siempre que el BLE no entregue GPS válido)
-        if ('geolocation' in navigator) {
-            navigator.geolocation.watchPosition(
-                (pos) => {
-                    if (!bleHasValidGps) {
-                        const lat = pos.coords.latitude;
-                        const lon = pos.coords.longitude;
-                        const spdKmh = pos.coords.speed ? Math.round(pos.coords.speed * 3.6) : 0;
-                        document.getElementById('m-spd').innerText = spdKmh;
-                        updateMap(lat, lon, 'TELÉFONO', '--');
-                    }
-                },
-                (err) => { console.warn('GPS Teléfono:', err.message); },
-                { enableHighAccuracy: true, maximumAge: 2000, timeout: 5000 }
-            );
+        // --- 3. CONSULTA REMOTA A LA NUBE (GOOGLE SHEETS) ---
+        const CLOUD_URL = "https://script.google.com/macros/s/AKfycbxdT-jvtJnbUrmV6-dacKz-dSzLexkrbpvoSo-Cd3QqSMdVCFCuf8bz2iJyLIEvdNFbhw/exec";
+
+        async function fetchCloudLocation() {
+            if (bleHasValidGps) return;
+
+            try {
+                const res = await fetch(CLOUD_URL);
+                const data = await res.json();
+
+                if (data.lat && data.lon) {
+                    document.getElementById('m-spd').innerText = Math.round(data.spd || 0);
+                    const label = data.timestamp ? `NUBE (${data.timestamp})` : 'AUTO (NUBE)';
+                    updateMap(data.lat, data.lon, label, data.sats ?? '--');
+                }
+            } catch (err) {
+                console.warn("Error leyendo ubicación de la nube:", err);
+                document.getElementById('v-gps-src').innerText = "NUBE OFFLINE";
+            }
         }
+
+        // Consultar al abrir y cada 15 segundos mientras no haya BLE activo
+        fetchCloudLocation();
+        setInterval(fetchCloudLocation, 15000);
 
         function toggleFollow() {
             followCar = !followCar;
@@ -235,7 +243,7 @@
             if (tabName === 'mapa') setTimeout(() => map.invalidateSize(), 100);
         }
 
-        // --- 3. GESTIÓN BLE CON HEARTBEAT Y RECONEXIÓN AUTOMÁTICA ---
+        // --- 4. GESTIÓN BLE CON HEARTBEAT Y RECONEXIÓN AUTOMÁTICA ---
         let bleDevice = null;
         let lastPacketTime = 0;
         let isReconnecting = false;
@@ -277,7 +285,6 @@
             lastPacketTime = Date.now();
             setBleStatus('alive');
 
-            // Destello breve del LED por cada paquete recibido
             hbDot.className = 'hb-dot pulse';
             setTimeout(() => { if (Date.now() - lastPacketTime < 3500) hbDot.className = 'hb-dot alive'; }, 150);
 
@@ -340,7 +347,7 @@
             }, 3000);
         }
 
-        // Watchdog: revisa cada segundo si los datos se congelaron (> 3.5s sin paquetes)
+        // Watchdog: detecta si el BLE se congeló (> 3.5s sin paquetes)
         setInterval(() => {
             if (bleDevice && lastPacketTime > 0 && (Date.now() - lastPacketTime > 3500)) {
                 setBleStatus('dead');
